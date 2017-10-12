@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<!-- saved from url=(0045)https://www2.cose.isu.edu/~cochgale/raytrace/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>Orbital Vanity</title>
+  
+  <link rel="stylesheet" href="./Orbital Vanity_files/style.css">
+  
+  <script src="./Orbital Vanity_files/webgl-utils.js"></script>
+  <script src="./Orbital Vanity_files/initShaders.js"></script>
+  <script src="./Orbital Vanity_files/MV.js"></script>
+
+  <script src="./Orbital Vanity_files/main.js"></script>
+  <script src="./Orbital Vanity_files/controls.js"></script>  
+  <script src="./Orbital Vanity_files/camera.js"></script>
+  <script src="./Orbital Vanity_files/graphics.js"></script>
+  <script src="./Orbital Vanity_files/physics.js"></script>
+
+
+  <script id="ray.vert" type="text/glsl">
+    attribute vec2 vPos;
+    void main(){
+      gl_Position = vec4(vPos, 1.0, 1.0);
+    }
+  </script>
+
+  <script id="ray.frag" type="text/glsl">
+    precision mediump float;
+    uniform float time;
+    uniform vec3 scrInfo;
+
+    //#define DEBUG_BOUNCES
+    
+    const int numBounces = 8;
+
+    const vec3 sphereCenter0 = vec3(0.0, 0.0, 0.0);
+    const float sphereRadius0 = 1.0;
+    const vec3 sphereColor0 = vec3(0.95, 0.95, 0.2);
+
+    const vec3 orbit = vec3(2.1, 0.7, 2.1);
+    const float sphereRadius1 = 0.7;
+    const vec3 sphereColor1 = vec3(0.3, 0.95, 0.95);
+
+    const vec3 planePoint = vec3(4.0, 0.0, 4.0);
+    const vec3 planeNormal = vec3(-0.688247, 0.229416, -0.688247);
+    const vec3 planeColor = vec3(0.95, 0.95, 0.95);
+    const vec3 planeColorBorder = vec3(0.2, 0.2, 0.2);
+    const float planeRadius = 1.0;
+
+    vec3 finalColor = vec3(1.0, 1.0, 1.0);
+    vec3 raySrc = vec3(0.8, 0.4, -3.0);
+    vec3 rayDir;
+
+    float sphere(vec3 ray, vec3 dir, vec3 center, float radius)
+    {
+      vec3 rc = ray-center;
+      float c = dot(rc, rc) - (radius*radius);
+      float b = dot(dir, rc);
+      float d = b*b - c;
+      float t = -b - sqrt(abs(d));
+      float st = step(0.0, min(t,d));
+      return mix(-1.0, t, st);
+    }
+    float plane(vec3 ray, vec3 dir, vec3 point, vec3 normal) {
+      return dot(normal, (point - ray)) / dot(dir, normal);
+    }
+    vec3 background(float t, vec3 rayDir)
+    {
+      float sinT = sin(t);
+      vec3 toLight = normalize(vec3(sinT * 0.3, sinT, cos(t)));
+      float nightFactorSoft = min(1.0, pow(sinT + 1.0, 4.0));
+      float nightFactorHard = pow(nightFactorSoft, 32.0);
+      float sunDotProd = max(0.0, dot(rayDir, toLight));
+      float sunItself = pow(sunDotProd, 1024.0);
+      float sunHalo = 0.4 * pow(sunDotProd, 8.0);
+      float sky = max(0.0, dot(rayDir, vec3(0.0, 1.0, 0.0)));
+      float ground = pow(max(0.0, -dot(rayDir, vec3(0.0, 1.0, 0.0))), 0.4);
+      return 
+        (sunItself * nightFactorHard + sunHalo * nightFactorSoft) * vec3(1.0, 1.6, 2.0)
+        + (vec3(0.4, 0.4, 0.4) * (nightFactorSoft + 0.25) - 
+        ground * vec3(0.3, 0.9, 1.5) * (1.0 - sinT * 0.6) -
+        sky * vec3(0.04, 0.20, 0.08) * (8.0 - sunDotProd * 4.0));
+    }
+    void main(){
+        vec2 uv = vec2((gl_FragCoord.x / scrInfo.x) * 2.0 - 1.0,
+          ((gl_FragCoord.y / scrInfo.y) * 2.0 - 1.0) * (scrInfo.z));
+        vec3 sphereCenter1 = vec3(sin(time * 3.0) * orbit.x,
+                                  sin(time * 2.0) * orbit.y,
+                                  cos(time * 3.0) * orbit.z);
+        rayDir = normalize(vec3(uv, 1.0));
+
+        for (int i = 0; i < numBounces; ++i) {
+          float dist0 = sphere(raySrc, rayDir, sphereCenter0, sphereRadius0);
+          vec3 faceNormal0 = normalize(-(raySrc - sphereCenter0 + rayDir * dist0));
+          vec3 rayRefl0 = reflect(rayDir, faceNormal0);          
+          float dist1 = sphere(raySrc, rayDir, sphereCenter1, sphereRadius1);
+          vec3 faceNormal1 = normalize(-(raySrc - sphereCenter1 + rayDir * dist1));
+          vec3 rayRefl1 = reflect(rayDir, faceNormal1);
+          if (dist0 >= 0.0) {
+            if (dist1 >= 0.0) {
+              if (dist0 >= dist1) {
+                finalColor *= sphereColor1;
+                raySrc = raySrc + rayDir * dist1;
+                rayDir = rayRefl1;
+              } else {
+                finalColor *= sphereColor0;
+                raySrc = raySrc + rayDir * dist0;
+                rayDir = rayRefl0;
+              }
+            } else {
+              finalColor *= sphereColor0;
+              raySrc = raySrc + rayDir * dist0;
+              rayDir = rayRefl0;
+            }
+          } else if (dist1 >= 0.0) {
+            finalColor *= sphereColor1;
+            raySrc = raySrc + rayDir * dist1;
+            rayDir = rayRefl1;
+          } else {
+            float distPlane = plane(raySrc, rayDir, planePoint, planeNormal);
+            vec3 raySrcCand = raySrc + rayDir * distPlane;
+            if (distPlane >= 0.5 &&
+                abs(raySrcCand.x - planePoint.x) < planeRadius + 0.15 &&
+                abs(raySrcCand.z - planePoint.z) < planeRadius + 0.15) {
+              if (abs(raySrcCand.x - planePoint.x) < planeRadius &&
+                  abs(raySrcCand.z - planePoint.z) < planeRadius) {
+                finalColor *= planeColor;
+              } else {
+                finalColor *= planeColorBorder;
+              }
+              raySrc = raySrcCand;
+              rayDir = reflect(rayDir, planeNormal);
+            } else {
+              #ifdef DEBUG_BOUNCES 
+                float p1i = float(i) * 0.1;
+                finalColor = vec3(p1i, p1i, p1i);
+              #endif
+              break;
+            }
+          }
+        }
+        finalColor *= background(time, rayDir);
+        gl_FragColor = vec4(finalColor, 1.0);
+    }
+  </script>
+  
+  </head>
+
+  <body>
+    <canvas id="gl-canvas" width="1024" height="600">
+      Your browser doesn't support the HTML5 canvas element.
+    </canvas>
+    <div id="timer">Time: 67.11633789062499</div>
+    <div id="speed">Speed: 0.001953125</div>
+    <div class="instrBox">
+      <p>
+      Spacebar pauses/unpauses the animation. Use [ and ] to decrease or increase animation speed.
+      </p>
+    </div>
+  
+
+
+</body></html>
